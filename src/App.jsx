@@ -155,6 +155,9 @@ export default function App() {
 
   const [generatedQuestions, setGeneratedQuestions] = useState({});
   const [loadingQuestions, setLoadingQuestions] = useState({});
+  const [selectedQuestion, setSelectedQuestion] = useState({});
+  const [generatedAnswers, setGeneratedAnswers] = useState({});
+  const [loadingAnswers, setLoadingAnswers] = useState({});
 
   const handleChatSubmit = async (e) => {
     e.preventDefault();
@@ -178,12 +181,30 @@ export default function App() {
     if (generatedQuestions[index]) return;
 
     setLoadingQuestions(prev => ({ ...prev, [index]: true }));
-    const prompt = `Based on Patrick's experience as ${job.role} at ${job.company} where he achieved: ${job.highlights.join(' ')}. Generate 2 insightful interview questions a recruiter could ask him about this role.`;
-    const sysInstruction = "You are a senior tech recruiter. Generate exactly 2 concise, challenging, but fair interview questions based on the candidate's experience. Output them as a numbered list. Do not include intro or outro text.";
+    const prompt = `Based on Patrick's experience as ${job.role} at ${job.company} where he achieved: ${job.highlights.join(' ')}. Generate 3 insightful interview questions a recruiter could ask him about this role.`;
+    const sysInstruction = `You are a senior tech recruiter. Generate exactly 3 concise, challenging, but fair interview questions based on the candidate's experience. You MUST return ONLY a valid JSON array of strings containing the questions. Do not include markdown formatting like \`\`\`json. Example: ["Question 1?", "Question 2?", "Question 3?"]`;
 
     const responseText = await generateGeminiResponse(prompt, sysInstruction);
-    setGeneratedQuestions(prev => ({ ...prev, [index]: responseText }));
+    try {
+      const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const questionsArray = JSON.parse(cleanedText);
+      setGeneratedQuestions(prev => ({ ...prev, [index]: questionsArray }));
+    } catch (e) {
+      setGeneratedQuestions(prev => ({ ...prev, [index]: [responseText] }));
+    }
     setLoadingQuestions(prev => ({ ...prev, [index]: false }));
+  };
+
+  const generateAnswer = async (index, job, question) => {
+    setSelectedQuestion(prev => ({ ...prev, [index]: question }));
+    setLoadingAnswers(prev => ({ ...prev, [index]: true }));
+
+    const prompt = `As Longwei (Patrick) Zhang, answer this interview question: "${question}". Base your answer specifically on your experience as ${job.role} at ${job.company} where you achieved: ${job.highlights.join(' ')}.`;
+    const sysInstruction = `You are an AI representing Longwei (Patrick) Zhang answering an interview question. Provide a professional, concise, and impactful answer (2-4 sentences). Focus on achievements and skills. Use first-person perspective ("I"). Do not use excessive markdown.`;
+
+    const responseText = await generateGeminiResponse(prompt, sysInstruction);
+    setGeneratedAnswers(prev => ({ ...prev, [index]: responseText }));
+    setLoadingAnswers(prev => ({ ...prev, [index]: false }));
   };
 
   // Handle scroll for navbar glass effect
@@ -527,11 +548,46 @@ export default function App() {
                             <div className="bg-white/80 backdrop-blur-md rounded-2xl p-5 border border-white shadow-sm">
                               <div className="flex items-center space-x-2 mb-3">
                                 <Sparkles className="w-4 h-4 text-purple-500" />
-                                <span className="text-xs font-bold uppercase tracking-wider text-indigo-800">Recruiter Questions (AI Generated)</span>
+                                <span className="text-xs font-bold uppercase tracking-wider text-indigo-800">
+                                  {!selectedQuestion[index] ? 'Select a question to answer' : 'AI Interview Answer'}
+                                </span>
                               </div>
-                              <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
-                                {generatedQuestions[index]}
-                              </div>
+                              
+                              {!selectedQuestion[index] ? (
+                                <div className="space-y-2">
+                                  {Array.isArray(generatedQuestions[index]) ? generatedQuestions[index].map((q, qIdx) => (
+                                    <button 
+                                      key={qIdx} 
+                                      onClick={() => generateAnswer(index, job, q)}
+                                      className="block w-full text-left p-3 rounded-xl border border-indigo-100 hover:bg-indigo-50 text-sm text-slate-700 transition-colors shadow-sm"
+                                    >
+                                      {q}
+                                    </button>
+                                  )) : (
+                                    <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                                      {generatedQuestions[index]}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-sm text-indigo-900 font-medium shadow-inner">
+                                    <span className="font-bold text-indigo-700 mr-2">Q:</span>{selectedQuestion[index]}
+                                  </div>
+                                  
+                                  {loadingAnswers[index] ? (
+                                     <div className="flex items-center space-x-2 text-sm text-indigo-600">
+                                       <Loader2 className="w-4 h-4 animate-spin" />
+                                       <span>Patrick's AI is typing...</span>
+                                     </div>
+                                  ) : (
+                                     <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">
+                                       <span className="font-bold text-indigo-600 mb-1 block">A:</span> 
+                                       {generatedAnswers[index]}
+                                     </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
