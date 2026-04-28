@@ -93,7 +93,7 @@ const ImageCarousel = ({ images }) => {
 const generateGeminiResponse = async (prompt, systemInstruction = "") => {
   // 从环境变量读取 API Key (Vite 会自动将 VITE_ 开头的变量注入到代码中)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || ""; 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -438,6 +438,7 @@ export default function App() {
               ref={videoRef}
               className="w-full h-full object-cover"
               controls
+              muted
               loop
               playsInline
               src="./Intro_Video.mp4"
