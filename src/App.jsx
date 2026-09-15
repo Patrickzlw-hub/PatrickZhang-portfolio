@@ -17,7 +17,8 @@ import {
   Send,
   Loader2,
   X,
-  Download
+  Download,
+  Play
 } from 'lucide-react';
 
 // --- Components ---
@@ -111,12 +112,17 @@ const generateGeminiResponse = async (prompt, systemInstruction = "") => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error(`HTTP status: ${res.status}`);
-      const data = await res.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't generate a response.";
-    } catch (error) {
+      if (res.ok) {
+        const data = await res.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
+      }
+      if (res.status === 429) {
+        await new Promise(r => setTimeout(r, delays[attempt] || 5000));
+        continue;
+      }
+      return "Unable to get a response. Please try again.";
+    } catch (e) {
       if (attempt === 5) {
-        console.error("API Error after retries:", error);
         return "Connection error. Please try again later.";
       }
       await new Promise(r => setTimeout(r, delays[attempt]));
@@ -126,12 +132,13 @@ const generateGeminiResponse = async (prompt, systemInstruction = "") => {
 
 const cvContext = `
 Name: Longwei (Patrick) Zhang
-Headline: Bridging enterprise needs. Powered by AI.
+Headline: Connecting business vision with cutting-edge digital innovation.
 Education: MSc Information Systems at Uppsala University, BSc Information Management at Shanghai Institute of Technology.
 Experience Highlights: 
-- Business Development Representative at Devoteam (Stockholm): Qualified 234 accounts, implemented AI prospecting workflow using Google Gemini and NotebookLM, reducing manual effort by 30-50%. Engaged 48 potential clients.
+- Business Development Representative at Devoteam (Stockholm, Feb 2026 — May 2026): Qualified 234 accounts, implemented AI prospecting workflow using Google Gemini and NotebookLM, reducing manual effort by 30-50%. Engaged 48 potential clients.
 - International Digital Ambassador at Uppsala University: Published 700+ pieces of content, reached 18.9K+ followers.
 - Global Operations Intern at UN Global Compact (New York): Supported UN General Assembly, researched 150+ multinational companies.
+- Club Master / International Secretary at Kalmar Nation (Sep 2024 — Jun 2026): Supported organization and execution of social and cultural events.
 Skills: Python (pandas, NumPy), SQL, Excel, Content Creation, English (C2), Chinese (C2), Swedish (A2).
 Certifications: Devoteam AI Level 2 – Sales.
 `;
@@ -163,48 +170,57 @@ export default function App() {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
-    const newUserMessage = { role: 'user', text: chatInput };
-    setChatMessages(prev => [...prev, newUserMessage]);
+    const userMsg = { role: 'user', text: chatInput };
+    setChatMessages((prev) => [...prev, userMsg]);
     setChatInput('');
     setIsTyping(true);
 
-    const prompt = `User asks: "${newUserMessage.text}". Previous conversation context: ${chatMessages.map(m => m.role + ': ' + m.text).join(' | ')}`;
-    const sysInstruction = `You are an AI assistant representing Longwei (Patrick) Zhang. Answer questions based on this CV context: ${cvContext}. Be extremely brief (1-3 sentences max), professional, and enthusiastic. Emphasize his business development and AI skills whenever relevant. Do not format with markdown bolding excessively.`;
+    const fullPrompt = `Context: ${cvContext}\n\nUser asked: "${userMsg.text}". Answer professionally, concisely, as Patrick's helpful AI assistant.`;
+    const reply = await generateGeminiResponse(fullPrompt, "You are Patrick's AI Portfolio Assistant.");
 
-    const responseText = await generateGeminiResponse(prompt, sysInstruction);
-
-    setChatMessages(prev => [...prev, { role: 'model', text: responseText }]);
+    setChatMessages((prev) => [...prev, { role: 'model', text: reply }]);
     setIsTyping(false);
   };
 
-  const generateInterviewQuestions = async (index, job) => {
-    if (generatedQuestions[index]) return;
+  const generateInterviewQuestions = async (jobIndex, job) => {
+    setLoadingQuestions(prev => ({ ...prev, [jobIndex]: true }));
+    const prompt = `Based on this experience:
+    Role: ${job.role}
+    Company: ${job.company}
+    Highlights: ${job.highlights.join(' ')}
 
-    setLoadingQuestions(prev => ({ ...prev, [index]: true }));
-    const prompt = `Based on Patrick's experience as ${job.role} at ${job.company} where he achieved: ${job.highlights.join(' ')}. Generate 3 insightful interview questions a recruiter could ask him about this role.`;
-    const sysInstruction = `You are a senior tech recruiter. Generate exactly 3 concise, challenging, but fair interview questions based on the candidate's experience. You MUST return ONLY a valid JSON array of strings containing the questions. Do not include markdown formatting like \`\`\`json. Example: ["Question 1?", "Question 2?", "Question 3?"]`;
+    Generate 3 insightful interview questions that an interviewer would ask about this role. Output ONLY a valid JSON array of 3 strings, e.g. ["Question 1", "Question 2", "Question 3"]. No markdown, no explanations.`;
 
-    const responseText = await generateGeminiResponse(prompt, sysInstruction);
+    const res = await generateGeminiResponse(prompt);
     try {
-      const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-      const questionsArray = JSON.parse(cleanedText);
-      setGeneratedQuestions(prev => ({ ...prev, [index]: questionsArray }));
-    } catch (e) {
-      setGeneratedQuestions(prev => ({ ...prev, [index]: [responseText] }));
+      const cleanRes = res.replace(/```json|```/g, '').trim();
+      const questions = JSON.parse(cleanRes);
+      setGeneratedQuestions(prev => ({ ...prev, [jobIndex]: questions }));
+    } catch (err) {
+      setGeneratedQuestions(prev => ({ ...prev, [jobIndex]: [
+        `How did your role as ${job.role} at ${job.company} drive measurable impact?`,
+        `What key technologies or methods did you utilize during this time?`,
+        `Can you share a specific challenge you overcame in this position?`
+      ] }));
+    } finally {
+      setLoadingQuestions(prev => ({ ...prev, [jobIndex]: false }));
     }
-    setLoadingQuestions(prev => ({ ...prev, [index]: false }));
   };
 
-  const generateAnswer = async (index, job, question) => {
-    setSelectedQuestion(prev => ({ ...prev, [index]: question }));
-    setLoadingAnswers(prev => ({ ...prev, [index]: true }));
+  const generateAnswer = async (jobIndex, job, question) => {
+    setSelectedQuestion(prev => ({ ...prev, [jobIndex]: question }));
+    setLoadingAnswers(prev => ({ ...prev, [jobIndex]: true }));
 
-    const prompt = `As Longwei (Patrick) Zhang, answer this interview question: "${question}". Base your answer specifically on your experience as ${job.role} at ${job.company} where you achieved: ${job.highlights.join(' ')}.`;
-    const sysInstruction = `You are an AI representing Longwei (Patrick) Zhang answering an interview question. Provide a professional, concise, and impactful answer (2-4 sentences). Focus on achievements and skills. Use first-person perspective ("I"). Do not use excessive markdown.`;
+    const prompt = `Context: Patrick's Experience as ${job.role} at ${job.company}:
+    ${job.highlights.join('\n')}
+    
+    Question: "${question}"
+    
+    Answer this interview question from Patrick's first-person perspective ('I'). Be confident, metrics-oriented, authentic, and concise (2-3 short paragraphs max).`;
 
-    const responseText = await generateGeminiResponse(prompt, sysInstruction);
-    setGeneratedAnswers(prev => ({ ...prev, [index]: responseText }));
-    setLoadingAnswers(prev => ({ ...prev, [index]: false }));
+    const answer = await generateGeminiResponse(prompt, "You are Patrick answering an interview question.");
+    setGeneratedAnswers(prev => ({ ...prev, [jobIndex]: answer }));
+    setLoadingAnswers(prev => ({ ...prev, [jobIndex]: false }));
   };
 
   // Handle scroll for navbar glass effect
@@ -222,9 +238,6 @@ export default function App() {
       ([entry]) => {
         if (entry.isIntersecting) {
           setIsVideoVisible(true);
-          videoRef.current?.play().catch(e => console.log("Autoplay prevented:", e));
-        } else {
-          videoRef.current?.pause();
         }
       },
       { threshold: 0.3 }
@@ -246,7 +259,7 @@ export default function App() {
     {
       role: "Business Development Representative",
       company: "Devoteam",
-      date: "Feb 2026 — Present",
+      date: "Feb 2026 — May 2026",
       location: "Stockholm, Sweden",
       highlights: [
         "Identified and qualified 234 target accounts and key decision-makers, building a pipeline for cloud and AI solutions.",
@@ -398,7 +411,7 @@ export default function App() {
         <section id="about" className="pt-16 sm:pt-20 flex flex-col items-center text-center">
 
           {/* Avatar Image */}
-          <div className="relative w-36 h-36 sm:w-44 sm:h-44 mb-6 group">
+          <div className="relative w-40 h-40 sm:w-48 sm:h-48 mb-6 group">
             <div className="absolute -inset-2 bg-gradient-to-br from-indigo-200 to-purple-200 rounded-[2rem] blur-xl opacity-60 transition duration-700"></div>
             {/* ⚠️ 更换头像：把这下面的 src 换成你的照片，比如 /Head_Shot.jpg */}
             <img
@@ -415,16 +428,14 @@ export default function App() {
             </span>
           </div>
 
-          {/* Cohesive Massive Slogan (Centered & Stacked) */}
-          <h1 className="max-w-4xl text-[2.75rem] sm:text-6xl lg:text-[4.8rem] font-bold tracking-tight text-slate-800 leading-[1.15] lg:leading-[1.15]">
-            <span className="block mb-1 lg:mb-2 text-slate-700">Connecting enterprise</span>
-            <span className="block mb-1 lg:mb-2 text-slate-700">
-              needs <span className="italic font-serif text-slate-400 font-light mx-1 lg:mx-2">with</span>
-              <span className="font-bold text-transparent bg-clip-text bg-[linear-gradient(90deg,#4285F4_10%,#EA4335_40%,#FBBC05_65%,#34A853_90%)] relative">
-                Google Cloud
-              </span>
+          {/* Cohesive Massive Slogan (Centered & Stacked - 2 Lines) */}
+          <h1 className="max-w-5xl text-[2.35rem] sm:text-5xl lg:text-[4.25rem] font-bold tracking-tight text-slate-800 leading-[1.18] lg:leading-[1.15]">
+            <span className="block mb-1.5 lg:mb-3 text-slate-700">
+              Connecting business vision <span className="italic font-serif text-slate-400 font-light mx-1 lg:mx-2">with</span>
             </span>
-            <span className="block text-slate-700">innovation.</span>
+            <span className="block font-bold text-transparent bg-clip-text bg-[linear-gradient(90deg,#4285F4_5%,#EA4335_35%,#FBBC05_65%,#34A853_95%)] pb-1">
+              cutting-edge digital innovation.
+            </span>
           </h1>
 
           {/* Download CV Button */}
@@ -439,34 +450,6 @@ export default function App() {
             </a>
           </div>
 
-        </section>
-
-        {/* VIDEO PRESENTATION SECTION */}
-        <section id="intro-video" className="w-full flex justify-center pt-10 pb-16">
-          <div
-            className={`
-              relative w-full max-w-5xl aspect-video rounded-[2rem] sm:rounded-[2.5rem] overflow-hidden 
-              shadow-[0_20px_50px_rgb(0,0,0,0.1)] border border-white/60 bg-black/5
-              transition-all duration-1000 ease-out transform
-              ${isVideoVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-16 scale-[0.96]'}
-            `}
-          >
-            {/* Dark gradient overlay for better text contrast and Apple-like premium feel */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent z-10 pointer-events-none"></div>
-
-            {/* ⚠️ 更换视频：把这下面的 src 换成你的视频，比如 /intro-video.mp4 */}
-            <video
-              ref={videoRef}
-              className="w-full h-full object-cover"
-              controls
-              muted
-              loop
-              playsInline
-              src="./Intro_Video.mp4"
-            >
-              Your browser does not support the video tag.
-            </video>
-          </div>
         </section>
 
         {/* EXPERIENCE SECTION (Alternating Layout) */}
@@ -597,7 +580,7 @@ export default function App() {
 
                   {/* Photo Section (Auto-Carousel) */}
                   <div className="w-full lg:w-1/2 flex justify-center">
-                    <div className="relative w-full max-w-md aspect-[4/3] lg:aspect-square xl:aspect-[4/3] rounded-[2rem] overflow-hidden border-[6px] border-white/60 shadow-[0_15px_40px_rgb(0,0,0,0.12)] group bg-slate-100 p-[2px]">
+                    <div className="relative w-full max-w-lg aspect-[4/3] lg:aspect-square xl:aspect-[4/3] rounded-[2rem] overflow-hidden border-[6px] border-white/60 shadow-[0_15px_40px_rgb(0,0,0,0.12)] group bg-slate-100 p-[2px]">
                       <ImageCarousel images={jobImages[index] || jobImages[0]} />
                       {/* Elegant Gradient Overlay */}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none rounded-[1.5rem]"></div>
@@ -652,7 +635,7 @@ export default function App() {
                   <div className="flex items-center text-sm font-semibold text-indigo-600/80 gap-3">
                     <span className="flex items-center bg-indigo-50/80 px-3 py-1.5 rounded-lg border border-indigo-100 shadow-sm"><User className="w-4 h-4 mr-2" /> Kalmar Nation</span>
                     <div className="flex items-center gap-4 text-slate-500 font-medium">
-                      <span className="flex items-center"><Calendar className="w-4 h-4 mr-1.5" /> Sep 2024 — Present</span>
+                      <span className="flex items-center"><Calendar className="w-4 h-4 mr-1.5" /> Sep 2024 — Jun 2026</span>
                     </div>
                   </div>
                   <p className="text-slate-600 leading-relaxed mt-4">
@@ -664,7 +647,7 @@ export default function App() {
 
             {/* Photo Carousel for Leadership */}
             <div className="w-full lg:w-1/2 flex justify-center">
-              <div className="relative w-full max-w-md aspect-[4/3] lg:aspect-square xl:aspect-[4/3] rounded-[2rem] overflow-hidden border-[6px] border-white/60 shadow-[0_15px_40px_rgb(0,0,0,0.12)] group bg-slate-100 p-[2px]">
+              <div className="relative w-full max-w-lg aspect-[4/3] lg:aspect-square xl:aspect-[4/3] rounded-[2rem] overflow-hidden border-[6px] border-white/60 shadow-[0_15px_40px_rgb(0,0,0,0.12)] group bg-slate-100 p-[2px]">
                 {/* ⚠️ 更换图片 */}
                 <ImageCarousel images={[
                   "./Kalmar_1.JPEG",
@@ -717,6 +700,37 @@ export default function App() {
                 ))}
               </ul>
             </GlassCard>
+          </div>
+        </section>
+
+        {/* VIDEO PRESENTATION SECTION */}
+        <section id="intro-video" className="pt-8">
+          <SectionTitle icon={Play} title="Video Presentation" />
+          <div className="w-full flex justify-center mt-8">
+            <div
+              className={`
+                relative w-full max-w-5xl aspect-video rounded-[2rem] sm:rounded-[2.5rem] overflow-hidden 
+                shadow-[0_20px_50px_rgb(0,0,0,0.1)] border border-white/60 bg-black/5
+                transition-all duration-1000 ease-out transform
+                ${isVideoVisible ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-16 scale-[0.96]'}
+              `}
+            >
+              {/* Dark gradient overlay for better text contrast and Apple-like premium feel */}
+              <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent z-10 pointer-events-none"></div>
+
+              {/* ⚠️ 更换视频：把这下面的 src 换成你的视频，比如 /intro-video.mp4 */}
+              <video
+                ref={videoRef}
+                className="w-full h-full object-cover"
+                controls
+                muted
+                loop
+                playsInline
+                src="./Intro_Video.mp4"
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
           </div>
         </section>
 
